@@ -9,42 +9,10 @@ jobs:
   send-news:
     runs-on: ubuntu-latest
     steps:
-      - name: ニュース収集してDiscord送信
-        shell: python
+      - name: Discordテスト送信
+        run: |
+          curl -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"content": "テスト送信です"}'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          import urllib.request
-          import urllib.parse
-          import xml.etree.ElementTree as ET
-          import json, os
-          from datetime import datetime, timezone, timedelta
-          JST = timezone(timedelta(hours=9))
-          today = datetime.now(JST).strftime('%Y年%m月%d日')
-          QUERIES = ['運送業 許可', 'トラック 物流', '物流 法改正']
-          articles = []
-          seen = set()
-          for q in QUERIES:
-            url = 'https://news.google.com/rss/search?q=' + urllib.parse.quote(q) + '&hl=ja&gl=JP&ceid=JP:ja'
-            try:
-              req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-              with urllib.request.urlopen(req, timeout=10) as r:
-                root = ET.fromstring(r.read())
-              for item in root.findall('.//item')[:3]:
-                title = item.findtext('title', '').strip()
-                link = item.findtext('link', '').strip()
-                if title and title not in seen:
-                  seen.add(title)
-                  articles.append({'title': title, 'link': link})
-            except Exception as e:
-              print(f'エラー: {e}')
-          lines = [f'**【運送業界ニュース】{today}** :truck:', '']
-          for i, a in enumerate(articles[:8], 1):
-            lines.append(f'**{i}.** {a["title"]}')
-            lines.append(f'<{a["link"]}>')
-            lines.append('')
-          lines.append('グローリー行政書士事務所 | 毎朝自動配信')
-          payload = json.dumps({'content': '\n'.join(lines)})
-          req2 = urllib.request.Request(os.environ['DISCORD_WEBHOOK_URL'], data=payload.encode(), headers={'Content-Type': 'application/json'}, method='POST')
-          urllib.request.urlopen(req2, timeout=10)
-          print('送信完了')
