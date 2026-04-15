@@ -9,10 +9,48 @@ jobs:
   send-news:
     runs-on: ubuntu-latest
     steps:
-      - name: Discordテスト送信
+      - name: ニュース収集してDiscord送信
         run: |
-          curl -X POST "$DISCORD_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d '{"content": "テスト送信です"}'
+          pip install feedparser requests -q
+
+          python3 - << 'EOF'
+          import requests, feedparser, os
+          from datetime import datetime, timezone, timedelta
+          from urllib.parse import quote
+
+          JST = timezone(timedelta(hours=9))
+          today = datetime.now(JST).strftime('%Y年%m月%d日')
+
+          QUERIES = ['運送業 許可', 'トラック 物流', '物流 法改正']
+          articles = []
+          seen = set()
+
+          for q in QUERIES:
+            url = f'https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja'
+            try:
+              feed = feedparser.parse(url)
+              for entry in feed.entries[:3]:
+                title = entry.get('title','').strip()
+                link = entry.get('link','').strip()
+                if title and title not in seen:
+                  seen.add(title)
+                  articles.append({'title':title,'link':link})
+            except Exception as e:
+              print(f'エラー:{e}')
+
+          lines = [f'**【運送業界ニュース】{today}** :truck:', '']
+          for i, a in enumerate(articles[:8], 1):
+            lines.append(f'**{i}.** {a["title"]}')
+            lines.append(f'<{a["link"]}>')
+            lines.append('')
+          lines.append('グローリー行政書士事務所 | 毎朝自動配信')
+
+          r = requests.post(
+            os.environ['DISCORD_WEBHOOK_URL'],
+            json={'content': '\n'.join(lines)}
+          )
+          print(f'Status: {r.status_code}')
+          r.raise_for_status()
+          EOF
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
