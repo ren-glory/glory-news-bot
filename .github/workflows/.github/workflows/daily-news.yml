@@ -9,82 +9,49 @@ jobs:
   send-news:
     runs-on: ubuntu-latest
     steps:
+      - name: ライブラリ準備
+        run: pip install requests feedparser
+
       - name: ニュース収集してDiscord送信
+        shell: python
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          python3 << 'EOF'
-          import urllib.request
-          import urllib.parse
-          import xml.etree.ElementTree as ET
-          import json
-          import os
+          import requests, feedparser, os
           from datetime import datetime, timezone, timedelta
+          from urllib.parse import quote
 
           JST = timezone(timedelta(hours=9))
           today = datetime.now(JST).strftime('%Y年%m月%d日')
 
-          QUERIES = ['運送業 許可', 'トラック 物流 規制', '物流 法改正', '運送業 行政書士']
-          MAX_ARTICLES = 8
-          DISCORD_LIMIT = 1900  # 余裕を持たせる
-
+          QUERIES = ['運送業 許可', 'トラック 物流 規制', '物流 法改正']
           articles = []
-          seen_titles = set()
-          seen_links = set()
+          seen = set()
 
           for q in QUERIES:
-              url = 'https://news.google.com/rss/search?q=' + urllib.parse.quote(q) + '&hl=ja&gl=JP&ceid=JP:ja'
-              try:
-                  req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                  with urllib.request.urlopen(req, timeout=10) as r:
-                      root = ET.fromstring(r.read())
+            url = f'https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja'
+            try:
+              feed = feedparser.parse(url)
+              for entry in feed.entries[:3]:
+                title = entry.get('title', '').strip()
+                link = entry.get('link', '').strip()
+                if title and title not in seen:
+                  seen.add(title)
+                  articles.append({'title': title, 'link': link})
+            except Exception as e:
+              print(f'エラー: {e}')
 
-                  for item in root.findall('.//item')[:3]:
-                      title = item.findtext('title', '').strip()
-                      link = item.findtext('link', '').strip()
+          lines = [f'**【運送業界ニュース】{today}** :truck:', '']
+          for i, a in enumerate(articles[:8], 1):
+            lines.append(f'**{i}.** {a["title"]}')
+            lines.append(f'<{a["link"]}>')
+            lines.append('')
+          lines.append('─────────────────')
+          lines.append('グローリー行政書士事務所 | 毎朝自動配信')
 
-                      if not title or not link:
-                          continue
-
-                      if title in seen_titles or link in seen_links:
-                          continue
-
-                      seen_titles.add(title)
-                      seen_links.add(link)
-                      articles.append({'title': title, 'link': link})
-
-              except Exception as e:
-                  print(f'取得エラー: query={q}, error={e}')
-
-          if not articles:
-              lines = [f'**【運送業界ニュース】{today}**', '本日はニュースを取得できませんでした。']
-          else:
-              lines = [f'**【運送業界ニュース】{today}** :truck:', '']
-              for i, a in enumerate(articles[:MAX_ARTICLES], 1):
-                  lines.append(f'**{i}.** {a["title"]}')
-                  lines.append(f'<{a["link"]}>')
-                  lines.append('')
-              lines.append('─────────────────')
-              lines.append('グローリー行政書士事務所 | 毎朝自動配信')
-
-          content = '\n'.join(lines)
-
-          if len(content) > DISCORD_LIMIT:
-              content = content[:DISCORD_LIMIT - 10] + '\n...'
-
-          webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
-          if not webhook_url:
-              raise RuntimeError('DISCORD_WEBHOOK_URL が未設定です')
-
-          payload = json.dumps({'content': content}).encode('utf-8')
-
-          req2 = urllib.request.Request(
-              webhook_url,
-              data=payload,
-              headers={'Content-Type': 'application/json'},
-              method='POST'
+          r = requests.post(
+            os.environ['DISCORD_WEBHOOK_URL'],
+            json={'content': '\n'.join(lines)}
           )
-
-          with urllib.request.urlopen(req2, timeout=10) as res:
-              print(f'送信完了 status={res.status}')
-          EOF
+          print(f'Discord応答: {r.status_code}')
+          r.raise_for_status()
